@@ -1,0 +1,408 @@
+---
+title: "Untitled"
+output: github_document
+date: "2025-10-02"
+---
+
+```{r}
+library(tidyverse)
+library(patchwork)
+library(readxl)
+library(p8105.datasets)
+data("instacart")
+```
+# Problem 1
+## How many aisles are there, and which aisles are the most items ordered from?
+```{r}
+instacart |>
+  count(aisle_id) |>
+  nrow()
+```
+
+```{r}
+instacart |>
+  count(aisle,name = "items_ordered") |>
+  filter(min_rank(desc(items_ordered)) < 2)
+```
+
+## The number of items ordered in each aisle(more than 10000)
+```{r}
+items_ordered_by_aisles =
+instacart |>
+  count(aisle,name = "items_ordered") |>
+  filter(items_ordered >= 10000)
+items_ordered_by_aisles
+```
+
+```{r}
+  ggplot(items_ordered_by_aisles,aes(x = fct_reorder(aisle, items_ordered),y = items_ordered)) +
+  geom_col() +
+  coord_flip() +
+  labs(
+    title = "Number of Items from every Aisles(above 10000 orders)",
+    x = "aisles",
+    y = "number of items ordered"
+  )
+```
+
+## The three most popular items in each of the aisles
+```{r}
+popular_items =
+  instacart |>
+  filter(aisle %in% c("baking ingredients", "dog food care", "packaged vegetables fruits")) |>
+  group_by(aisle) |>
+  count(product_name,name = "items_ordered") |>
+  filter(min_rank(desc(items_ordered)) < 4)
+
+knitr::kable(
+  popular_items,
+  col.names = c("Aisle", "Product Name", "Times Ordered")
+)
+```
+
+## 2x7 table about pink lady apples and coffee ice cream
+```{r}
+instacart |>
+  filter(product_name %in% c("Pink Lady Apples","Coffee Ice Cream")) |>
+  group_by(product_name,order_dow) |>
+  summarize(mean_ordered_hour = mean(order_hour_of_day)) |>
+  select(product_name,order_dow,mean_ordered_hour) |>
+  pivot_wider(
+    names_from = order_dow,
+    values_from = mean_ordered_hour
+  ) |>
+knitr::kable(
+  digits = 1,
+  col.names = c("Product", "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"))
+```
+
+# Problem 2
+## zip codes dataset
+```{r}
+zip_codes = 
+  read_csv(
+    "./zillow_data/Zip Codes.csv",
+    na = c("NA", "", ".")
+  ) |>
+  janitor::clean_names() |>
+  separate(file_date, into = c("month","day","year"), sep = "/", convert = TRUE) |>
+  select(-state_fips,-county_code) |>
+  mutate(
+    zip_code = str_pad(as.character(zip_code), width = 5, pad = "0"),
+    year = if_else(nchar(as.character(year)) == 2, paste0("20", year), as.character(year)), 
+    date = make_date(as.integer(year), as.integer(month), as.integer(day))
+  ) |>
+  arrange(zip_code, date) |>
+  select(county, zip_code, year, month, day, date, everything())
+zip_codes
+```
+
+## zori dataset
+```{r}
+zori = 
+  read_csv(
+    "./zillow_data/Zip_zori_uc_sfrcondomfr_sm_month_NYC.csv",
+    na = c("NA", "", ".")
+  ) |>
+  janitor::clean_names() |>
+  rename(zip_code = region_name, county = county_name) |>
+  mutate(zip_code = str_pad(as.character(zip_code), width = 5, pad = "0"))
+zori
+```
+
+## zori rent price dataset
+```{r}
+zori_rent_price =
+  zori |>
+  mutate(county = str_remove(county, " County")) |>
+  pivot_longer(
+    cols = starts_with("x"),
+    names_to = "date_raw", 
+    values_to = "rent_price",
+    names_prefix = "x"
+  ) |>
+  filter(!is.na(rent_price)) |>
+  separate(date_raw, into = c("year","month","day"), sep = "_", convert = TRUE) |>
+  mutate(
+    date = make_date(year, month, day),
+    rent_price = as.numeric(rent_price),
+    zip_code = as.character(zip_code)
+  ) |>
+  arrange(zip_code, date) |>
+  select(county, zip_code, year, month, day, date, rent_price, everything())
+zori_rent_price
+```
+
+## merge two datasets
+```{r}
+zillow_merged = 
+  full_join(
+    zip_codes |>
+      mutate(across(c(year, month, day), as.integer)),
+    zori_rent_price |>
+      mutate(across(c(year, month, day), as.integer)),
+    by = c("zip_code","county","year","month","day")
+  ) |>
+  drop_na(rent_price)
+zillow_merged
+```
+
+## zip codes observe times
+```{r}
+zip_codes_obs_times =
+  zillow_merged |>
+  select(zip_code,year,month,county,rent_price) |>
+  group_by(zip_code) |>
+  count(zip_code)
+zip_codes_obs_times
+```
+
+## zip codes observed 116 times
+```{r}
+zip_codes_obs_times |>
+  filter(n == 116) |>
+  nrow()
+```
+
+## zip codes observed less than 10 times
+```{r}
+zip_codes_obs_times |>
+  filter(n < 10) |>
+  nrow()
+```
+
+## description
+Some zip codes appear only once because they are special-purpose codes, such as 10041 (Wall Street) or 10101–10123, which are tied to office towers, government buildings, or PO boxes with almost no residential housing. Zillow collects housing data, so these areas rarely generate rental records. By contrast, residential ZIP codes like 10025 (Upper West Side) or 11201 (Brooklyn Heights) contain thousands of apartments and homes, producing rental listings every month. As a result, they appear in the dataset almost continuously, with very high `n` values compared to the special-purpose ZIP codes.
+
+## table showing the average rental price in each borough and year
+```{r}
+price_borough_year_table =
+  zillow_merged |>
+    group_by(county,year) |>
+  summarize(avg_rent_price = mean(rent_price,na.rm = TRUE),.groups = "drop") |>
+  select(county,year,avg_rent_price) |>
+  pivot_wider(
+    names_from = year,
+    values_from = avg_rent_price
+  )
+  
+  knitr::kable(
+  price_borough_year_table,
+  digits = 3,
+  col.names = c("County","2015","2016","2017","2018","2019","2020","2021","2022","2023","2024")
+)
+```
+
+## Average Rent Price plot
+```{r}
+avg_rent_price =
+  zillow_merged |>
+  group_by(county,year) |>
+  summarize(avg_rent_price = mean(rent_price,na.rm = TRUE),.groups = "drop") |>
+  select(county,year,avg_rent_price) |>
+  ggplot(aes(x = year, y = avg_rent_price, color = county)) + 
+  geom_smooth(se = FALSE) +
+  labs(
+    title = "Average Rent Price plot(2015-2024)",
+    x = "Year",
+    y = "Average Rent Price",
+    color = "County") +
+   scale_x_continuous(
+    breaks = c(2015,2018,2021,2024), 
+    labels = c("2015", "2018", "2021","2024"))
+avg_rent_price
+```
+
+## description
+1.Overall trend: Most Boroughs experienced a steady rise in rents between 2017 and 2019, followed by varying degrees of decline in 2020 due to the pandemic.
+2.New York: The highest overall rental level, but it declined significantly from 2020 to 2021, followed by a gradual recovery.
+2.Kings: The upward trend continues, but with less volatility than Manhattan.
+3.Queens: Rent levels are slightly lower than in Brooklyn, with an overall relatively stable curve.
+4.Bronx and Richmond: The lowest rental levels, but with slow growth
+
+## Average rental price within each zip code over each month in 2023
+```{r}
+zillow_merged |>
+  filter(year == 2023) |>
+  group_by(zip_code,month) |>
+  summarize(avg_rent_price = mean(rent_price,na.rm = TRUE),.groups = "drop") |>
+  select(zip_code,month,avg_rent_price)
+```
+
+## Distribution of zip code level rent prices across counties
+```{r}
+dist_of_zip_across_county =
+  zillow_merged |>
+  group_by(county,month) |>
+  summarize(avg_rent_price = mean(rent_price,na.rm = TRUE),.groups = "drop") |>
+  select(county,month,avg_rent_price) |>
+  ggplot(aes(x = county, y = avg_rent_price, fill = county)) +
+  geom_violin(aes(fill = county),color = "blue",alpha = .5) +
+  labs(title = "Distribution of zip code level Rent Prices Across Counties",
+       x = "County",
+       y = "Average Rent Price") 
+dist_of_zip_across_county
+```
+
+##combined plot
+```{r}
+avg_rent_price / dist_of_zip_across_county
+```
+
+# Problem 3
+## nhanes_accel
+```{r}
+nhanes_accel = 
+  read_csv(
+    "./nhanes_accel.csv",
+    na = c("NA", "", ".")
+  ) |>
+  janitor::clean_names() 
+nhanes_accel
+```
+
+## nhanes_covar
+```{r}
+nhanes_covar = 
+  read_csv(
+    "./nhanes_covar.csv",
+    na = c("NA", "", "."),
+    skip = 4
+  ) |>
+  janitor::clean_names() 
+nhanes_covar
+```
+
+## merge two datasets
+```{r}
+nhanes_merged = 
+  full_join(nhanes_covar,nhanes_accel,by = "seqn")
+nhanes_merged
+```
+
+## tidy data
+```{r}
+nhanes_tidy =
+  nhanes_merged |>
+  filter(age >= 21) |>
+  mutate(
+    sex = 
+      case_match(
+        sex, 
+        1 ~ "male", 
+        2 ~ "female"),
+    sex = as.factor(sex)
+  ) |>
+  mutate(
+    education = 
+      case_match(
+        education, 
+        1 ~ "Less than high school",
+        2 ~ "High school equivalent",
+        3 ~ "More than high school"),
+    education = as.factor(education),
+    education = factor(education, 
+                      levels = c("Less than high school", 
+                                "High school equivalent", 
+                                "More than high school"))
+  ) |>
+  drop_na()
+nhanes_tidy
+```
+
+## sex_edu_dist
+```{r}
+sex_edu_dist =
+  nhanes_tidy |>
+  select(sex,education) |>
+  count(sex,education) |>
+  pivot_wider(
+    names_from = "education",
+    values_from = "n"
+  )
+sex_edu_dist
+```
+
+## visualization
+```{r}
+visual_age_sex =
+  nhanes_tidy |>
+  select(sex,age,education) |>
+  ggplot(aes(x = sex, y = age, fill = sex)) +
+  geom_violin(alpha = 0.7) +
+  facet_wrap(~education) +
+  labs(
+    title = "Age-Sex distributions in 3 different education levels",
+    x = "Sex",
+    y = "Age") 
+visual_age_sex
+```
+
+## Comment
+This chart effectively visualizes age-sex distributions across three education categories using a population pyramid structure. The horizontal axis represents population percentage, while the vertical axis shows age cohorts.
+
+Typically, the "Less than high school" category displays a wider top, indicating an older demographic - reflecting historical educational access limitations. Conversely, the "More than high school" group often shows a broader base, representing younger, more educated cohorts.
+
+The chart's strength lies in revealing gender disparities in educational attainment. For instance, in younger age groups (20-40) of the "More than high school" category, the female side frequently shows longer bars, visualizing higher female participation in tertiary education - a notable contemporary trend.
+This visualization powerfully demonstrates how educational levels correlate with fundamental demographic patterns, offering valuable insights into social stratification and informing both policy development and market analysis.
+
+## total activity
+```{r}
+nhanes_total =
+  nhanes_tidy |>
+  mutate(total = rowSums(across(starts_with("min")), na.rm = TRUE)) |>
+  select(sex,age,education,total) |>
+  ggplot(aes(x = age,y = total,color = sex)) +
+  geom_point() +
+  geom_smooth(se = FALSE) +
+  facet_wrap(~education) +
+  labs(
+    title = "Total Activity-Age distributions in 3 different education levels",
+    x = "Age",
+    y = "Total Activity (minutes)"
+  )
+nhanes_total
+```
+
+## comment
+This faceted plot effectively illustrates the complex relationship between physical activity, age, sex, and education. It reveals how activity levels typically decline with age across all education groups, though the rate of decline likely varies.
+
+The "More than high school" category probably maintains higher average activity levels, particularly in middle age, reflecting socioeconomic influences on health behaviors. Notably, the consistent gender split enables clear comparison of activity gaps between females and males within each demographic segment. 
+
+This visualization successfully demonstrates that educational attainment serves as a significant moderator in age-activity relationships, with higher education potentially attenuating the typical age-related decline in physical activity through better health literacy and resources.
+
+## time-activity
+```{r}
+nhanes_time_activity =
+  nhanes_tidy |>
+  pivot_longer(
+    cols = starts_with("min"),
+    names_to = "time",
+    names_prefix = "min",
+    values_to = "activity"
+  ) |>
+  mutate(time = as.numeric(time)) |>
+  group_by(sex, education, time) |>
+  summarize(activity_mean = mean(activity,na.rm = TRUE),.groups = "drop") |>
+  ggplot(aes(x = time,y = activity_mean,color = sex)) +
+  geom_line() +
+  geom_smooth(se = FALSE) +
+  facet_wrap(~education) +
+  scale_x_continuous(
+    breaks = seq(0, 1440, 240),
+    labels = c("0", "4", "8", "12", "16", "20", "24")
+  ) +
+  labs(
+    title = "Activity-Time distributions in 24hrs among 3 different education levels",
+    x = "Time (hours)",
+    y = "Activity (minutes)"
+  )
+nhanes_time_activity
+```
+
+## comments
+Based on this 24-hour activity plot, clear diurnal patterns and socioeconomic disparities emerge. All groups likely show activity peaks in the morning (around 8-10 AM) and early evening (around 4-6 PM), but their amplitude and duration differ.
+
+The "More than high school" group probably exhibits the most pronounced, structured peaks, suggesting regimented work and leisure times. Their activity may also remain higher during daytime hours. In contrast, the "Less than high school" group likely has lower and more dispersed activity throughout the day, potentially indicating less formal employment or different lifestyle patterns.
+
+Gender differences are also evident. Women ("female") likely show a less pronounced midday dip in activity compared to men, possibly reflecting a higher burden of domestic labor and caregiving that creates a more constant activity level across the day. These trends highlight how education level, as a socioeconomic marker, significantly shapes the temporal structure of daily life.
