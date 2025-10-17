@@ -143,7 +143,8 @@ zillow_merged =
       mutate(across(c(year, month, day), as.integer)),
     by = c("zip_code","county","year","month","day")
   ) |>
-  drop_na(rent_price)
+  drop_na(rent_price) |>
+  distinct(zip_code, year, month, day, .keep_all = TRUE)
 zillow_merged
 ```
 
@@ -192,6 +193,9 @@ price_borough_year_table =
   col.names = c("County","2015","2016","2017","2018","2019","2020","2021","2022","2023","2024")
 )
 ```
+
+## description
+This table presents the average rental prices across New York City's five boroughs from 2015 to 2024. Manhattan (New York County) consistently has the highest rents, reaching over $4,000 by 2024, followed by Kings. Queens shows steady growth, while the Bronx, despite starting as the most affordable, experienced the steepest price increase over the decade. A noticeable, moderate dip in prices occurred in 2020 across most boroughs. Richmond data is unavailable. Overall, the table reveals a clear upward trajectory in NYC's rental market, highlighting the dynamic and often expensive nature of its housing landscape.
 
 ## Average Rent Price plot
 ```{r}
@@ -244,7 +248,7 @@ dist_of_zip_across_county =
 dist_of_zip_across_county
 ```
 
-##combined plot
+## combined plot
 ```{r}
 avg_rent_price / dist_of_zip_across_county
 ```
